@@ -1,0 +1,45 @@
+{
+  "host": "Darwin arm64, Python 3.13.5",
+  "rows": [
+    {
+      "backend": "python",
+      "n_sims": 4000,
+      "n_lineups": 1700,
+      "n_starters": 9,
+      "seconds": 2.448721041000681,
+      "lineup_sims_per_sec": 2776959.843993152,
+      "peak_mb": 0.544,
+      "note": "nested Python loops, measured on 4,000 simulations"
+    },
+    {
+      "backend": "numpy",
+      "n_sims": 1000000,
+      "n_lineups": 1700,
+      "n_starters": 9,
+      "seconds": 4.91656283300108,
+      "lineup_sims_per_sec": 345770014.0816295,
+      "peak_mb": 273.9142,
+      "note": "ready"
+    },
+    {
+      "backend": "cupy",
+      "n_sims": 0,
+      "n_lineups": 1700,
+      "n_starters": 9,
+      "seconds": NaN,
+      "lineup_sims_per_sec": NaN,
+      "peak_mb": NaN,
+      "note": "unavailable (No module named 'cupy')"
+    },
+    {
+      "backend": "cuda",
+      "n_sims": 0,
+      "n_lineups": 1700,
+      "n_starters": 9,
+      "seconds": NaN,
+      "lineup_sims_per_sec": NaN,
+      "peak_mb": NaN,
+      "note": "unavailable (No module named 'cupy')"
+    }
+  ]
+}

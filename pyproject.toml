@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "boombust"
+version = "0.1.0"
+description = "Monte Carlo fantasy football lineup optimiser: ranks lineups by win probability, not projected points."
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "pyarrow>=12",
+    "requests>=2.28",
+    "matplotlib>=3.7",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+gpu = ["cupy-cuda12x>=13.0"]
+dev = ["pytest>=7.4"]
+
+[project.scripts]
+boombust = "boombust.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["boombust*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore::DeprecationWarning"]

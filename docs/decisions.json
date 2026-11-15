@@ -1,0 +1,27 @@
+{
+  "n_decisions": 2240,
+  "seasons": [
+    2021,
+    2022,
+    2023,
+    2024
+  ],
+  "leagues": [
+    "synthetic",
+    "synthetic-b",
+    "synthetic-c",
+    "synthetic-d"
+  ],
+  "n_sims_per_decision": 150000,
+  "agreement_rate": 0.9209821428571429,
+  "n_disagreements": 177,
+  "n_outcome_changed": 20,
+  "win_prob_pick_won": 5,
+  "points_pick_won": 15,
+  "net_wins": -10.0,
+  "paired_se_wins": 4.421024151195574,
+  "mean_claimed_edge_pp": 0.15992090395480243,
+  "expected_extra_wins_if_true": 0.2830600000000003,
+  "net_wins_when_favoured": -9.0,
+  "net_wins_when_underdog": -1.0
+}
