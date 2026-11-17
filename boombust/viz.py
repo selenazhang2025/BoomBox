@@ -248,11 +248,19 @@ def benchmark_chart(
         )
 
         baseline = values[0] if len(values) else 1.0
+        extrapolated = False
         for pos, row, value in zip(positions, usable, values):
-            peak = row["peak_mb"]
+            # Peak memory only compares across rows if every row is quoted at the
+            # same workload: a baseline that ran a short slice of the week would
+            # otherwise look like the leanest backend on the chart.
+            peak = row.get("peak_mb_at_full")
+            if peak is None or peak != peak:
+                peak = row["peak_mb"]
             peak_text = f"{peak:,.0f} MB" if peak >= 1 else f"{peak * 1000:,.0f} kB"
+            mark = "*" if row.get("extrapolated") else ""
+            extrapolated |= bool(row.get("extrapolated"))
             ax.annotate(
-                f"{value:,.0f}/s    {value / baseline:,.0f}x    {peak_text} peak",
+                f"{value:,.0f}/s{mark}    {value / baseline:,.0f}x    {peak_text} peak",
                 xy=(value, pos), xytext=(14, 0), textcoords="offset points",
                 va="center", fontsize=9, color=theme.ink_secondary, zorder=5,
             )
@@ -260,11 +268,23 @@ def benchmark_chart(
         ax.set_ylim(-0.6, len(usable) - 0.4)
         ax.set_xscale("log")
         if len(values):
-            ax.set_xlim(floor, values.max() * 60)
+            # Only enough headroom to lift the fastest dot off the spine. The
+            # labels sit outside the axes and a tight bounding box keeps them --
+            # stretching the axis to fit text instead would paint decade ticks
+            # across empty space the data never reaches.
+            ax.set_xlim(floor, values.max() * 2.2)
         ax.set_xlabel("lineup-simulations per second (log scale)")
         ax.xaxis.grid(True)
         ax.yaxis.grid(False)
         ax.set_axisbelow(True)
+        if extrapolated:
+            ax.annotate(
+                "* rate measured on a shorter run and quoted per second;"
+                " peak memory restated at the full workload",
+                xy=(0, 0), xytext=(0, -42), xycoords="axes fraction",
+                textcoords="offset points", fontsize=8, color=theme.muted,
+                ha="left", va="top",
+            )
         _header(ax, theme, title, subtitle)
         fig.savefig(out)
         plt.close(fig)

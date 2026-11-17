@@ -53,7 +53,7 @@ def make_risk_tilt(n_sims: int) -> None:
 
 
 def make_benchmark(n_sims: int, n_lineups: int, python_sims: int) -> None:
-    from boombust.bench import format_table, host_description, run, save
+    from boombust.bench import device_description, format_table, host_description, run, save
     from boombust.viz import benchmark_chart
 
     rows = run(n_sims=n_sims, n_lineups=n_lineups, python_sims=python_sims)
@@ -61,9 +61,37 @@ def make_benchmark(n_sims: int, n_lineups: int, python_sims: int) -> None:
     save(rows, REPO / "docs" / "benchmark.json")
     paths = benchmark_chart(
         [asdict(r) for r in rows], IMG / "benchmark.png",
-        subtitle=f"{n_lineups:,} candidate lineups x {n_sims:,} simulated weeks  ·  {host_description()}",
+        subtitle=(
+            f"{n_lineups:,} candidate lineups x {n_sims:,} simulated weeks  ·  "
+            + "  ·  ".join(x for x in (device_description(), host_description()) if x)
+        ),
     )
     print("benchmark ->", ", ".join(str(p) for p in paths))
+
+
+def redraw_benchmark(source: Path) -> None:
+    """Redraw the benchmark chart from a saved run instead of measuring again.
+
+    The GPU rows can only be measured on a CUDA machine, so the run that
+    produced them is the artifact worth keeping. This redraws the chart from
+    that stored JSON -- on any machine, without a GPU and without overwriting
+    the numbers with whatever the local box happens to manage.
+    """
+    from boombust.viz import benchmark_chart
+
+    payload = json.loads(Path(source).read_text())
+    rows = payload["rows"]
+    live = [r for r in rows if r.get("lineup_sims_per_sec") == r.get("lineup_sims_per_sec")]
+    if not live:
+        raise SystemExit(f"{source} has no usable rows")
+    n_sims = max(r.get("n_sims_full") or r.get("n_sims", 0) for r in live)
+    n_lineups = live[0].get("n_lineups", 0)
+    where = "  ·  ".join(x for x in (payload.get("device", ""), payload.get("host", "")) if x)
+    paths = benchmark_chart(
+        rows, IMG / "benchmark.png",
+        subtitle=f"{n_lineups:,} candidate lineups x {n_sims:,} simulated weeks  ·  {where}",
+    )
+    print("benchmark (redrawn from", f"{source})", "->", ", ".join(str(p) for p in paths))
 
 
 def make_reliability(league_ids: list[str], seasons: list[int], weeks: range, n_sims: int) -> None:
@@ -130,6 +158,10 @@ def main() -> None:
     parser.add_argument("--all", action="store_true")
     parser.add_argument("--risk-tilt", action="store_true")
     parser.add_argument("--benchmark", action="store_true")
+    parser.add_argument(
+        "--benchmark-from", metavar="JSON",
+        help="redraw the benchmark chart from a saved run instead of measuring again",
+    )
     parser.add_argument("--calibration", action="store_true")
     parser.add_argument("--sims", type=int, default=2_000_000, help="simulations for the risk-tilt sweep")
     parser.add_argument("--bench-sims", type=int, default=1_000_000)
@@ -143,7 +175,9 @@ def main() -> None:
     IMG.mkdir(parents=True, exist_ok=True)
     if args.all or args.risk_tilt:
         make_risk_tilt(args.sims)
-    if args.all or args.benchmark:
+    if args.benchmark_from:
+        redraw_benchmark(Path(args.benchmark_from))
+    elif args.all or args.benchmark:
         make_benchmark(args.bench_sims, args.bench_lineups, args.python_sims)
     if args.all or args.calibration:
         make_reliability(

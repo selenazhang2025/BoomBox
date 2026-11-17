@@ -1,45 +1,59 @@
 {
-  "host": "Darwin arm64, Python 3.13.5",
+  "host": "Linux x86_64, Python 3.13.16",
+  "device": "Tesla T4",
+  "provenance": "Rebuilt from the run's own console output and chart: the 'boombust benchmark' invocation passed --chart but not --out, so no JSON was written on the machine. Rates and peak memory are the reported values and 'seconds' is derived from rate x workload; every field has been checked against the printed table and agrees to its displayed precision. Pass --out next time and this file is the run itself.",
   "rows": [
     {
       "backend": "python",
       "n_sims": 4000,
       "n_lineups": 1700,
       "n_starters": 9,
-      "seconds": 2.448721041000681,
-      "lineup_sims_per_sec": 2776959.843993152,
+      "seconds": 3.334258426602675,
+      "lineup_sims_per_sec": 2039434.0,
       "peak_mb": 0.544,
-      "note": "nested Python loops, measured on 4,000 simulations"
+      "note": "nested Python loops, measured on 4,000 simulations and quoted as a rate; memory restated at 1,000,000",
+      "peak_mb_at_full": 136.0,
+      "n_sims_full": 1000000,
+      "extrapolated": true
     },
     {
       "backend": "numpy",
       "n_sims": 1000000,
       "n_lineups": 1700,
       "n_starters": 9,
-      "seconds": 4.91656283300108,
-      "lineup_sims_per_sec": 345770014.0816295,
+      "seconds": 8.81580898992018,
+      "lineup_sims_per_sec": 192835394.0,
       "peak_mb": 273.9142,
-      "note": "ready"
+      "note": "ready",
+      "peak_mb_at_full": 273.9142,
+      "n_sims_full": 1000000,
+      "extrapolated": false
     },
     {
       "backend": "cupy",
-      "n_sims": 0,
+      "n_sims": 1000000,
       "n_lineups": 1700,
       "n_starters": 9,
-      "seconds": NaN,
-      "lineup_sims_per_sec": NaN,
-      "peak_mb": NaN,
-      "note": "unavailable (No module named 'cupy')"
+      "seconds": 0.2502861059860782,
+      "lineup_sims_per_sec": 6792226813.0,
+      "peak_mb": 1095.3,
+      "note": "ready",
+      "peak_mb_at_full": 1095.3,
+      "n_sims_full": 1000000,
+      "extrapolated": false
     },
     {
       "backend": "cuda",
-      "n_sims": 0,
+      "n_sims": 1000000,
       "n_lineups": 1700,
       "n_starters": 9,
-      "seconds": NaN,
-      "lineup_sims_per_sec": NaN,
-      "peak_mb": NaN,
-      "note": "unavailable (No module named 'cupy')"
+      "seconds": 0.07428002099925032,
+      "lineup_sims_per_sec": 22886369405.0,
+      "peak_mb": 0.089,
+      "note": "ready",
+      "peak_mb_at_full": 0.089,
+      "n_sims_full": 1000000,
+      "extrapolated": false
     }
   ]
 }

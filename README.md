@@ -184,24 +184,40 @@ This exercises the kernel's indexing, shared-memory layout, RNG, tallying, barri
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/benchmark-dark.png">
-  <img src="docs/img/benchmark.png" alt="Throughput by backend on a log scale: pure Python 2.8 million lineup-simulations per second, NumPy 346 million" width="760">
+  <img src="docs/img/benchmark.png" alt="Throughput by backend on a log scale, measured on an NVIDIA T4: pure Python 2 million lineup-simulations per second, NumPy 193 million, CuPy 6.8 billion, the CUDA kernel 22.9 billion" width="760">
 </picture>
 
 One *lineup-simulation* = sum one candidate lineup's starters for one simulated week and compare it to the opponent. A week with 1,700 lineups and a million simulations is 1.7 billion of them.
 
-| backend | lineup-sims/sec | vs pure Python | peak memory |
-|---|---|---|---|
-| `python` (nested loops) | 2,776,960 | 1× | — |
-| `numpy` | 345,770,014 | **125×** | 274 MB |
-| `cupy` | *needs CUDA* | | |
-| `cuda` | *needs CUDA* | | |
+| backend | lineup-sims/sec | vs pure Python | peak memory | wall clock |
+|---|---|---|---|---|
+| `python` (nested loops) | 2,039,434 | 1× | 136 MB | 13 min 54 s† |
+| `numpy` | 192,835,394 | **95×** | 274 MB | 8.82 s |
+| `cupy` | 6,792,226,813 | **3,330×** | 1,095 MB | 0.25 s |
+| `cuda` | 22,886,369,405 | **11,222×** | **0.089 MB** | 0.074 s |
 
-Measured on an Apple M4. **The GPU rows are blank because this machine has no NVIDIA GPU** — CuPy does not install on macOS. The backends are written, the kernel is tested for correctness against the reference (above), but any speedup number for them would be invented, so there is none here. On a CUDA machine:
+Measured on an **NVIDIA Tesla T4** (Turing, 40 SMs, 16 GB GDDR6, 320 GB/s), Linux x86_64, Python 3.13.16.
+
+† The Python baseline is timed on a 4,000-simulation slice and quoted as a rate — the full 1.7 billion would take about fourteen minutes, and the point of the row is the rate, not the wait.
+
+**Read the memory column, not just the speed one.** Every figure there is quoted at the same 1,000,000-simulation workload, which is the only way the column compares like with like.
+
+CuPy is not short of memory — it chunks to a 1 GB budget, and 1,095 MB is under 7% of a T4's 16 GB. Its problem is *traffic*. Materialising the lineup totals means writing 1,700 × 1,000,000 floats — **6.8 GB** — to device memory and reading them back to compare them, about 54 GB/s sustained against the T4's 320 GB/s. The kernel keeps each lineup's running total in a register and writes only the final counters: **27 kB, once.** That is where the extra 3.4× comes from, and it is the whole argument for writing the kernel — the part a speed chart alone hides.
+
+For scale, on this T4 the kernel runs at roughly **10% of the card's shared-memory load throughput** and 8% of its instruction issue rate, so the 11,222× is a result of not moving data rather than of saturating the hardware. There is headroom left in it.
+
+Reproducing it needs a CUDA machine:
 
 ```bash
 pip install -e ".[gpu]"
 boombust backends                      # confirm they are visible
-boombust benchmark --chart docs/img/benchmark.png
+boombust benchmark --chart docs/img/benchmark.png --out docs/benchmark.json
+```
+
+The run that produced the numbers above is saved in [`docs/benchmark.json`](docs/benchmark.json). The chart can be redrawn from it on any machine — no GPU, and without overwriting the measurements with whatever the local box manages:
+
+```bash
+python scripts/make_charts.py --benchmark-from docs/benchmark.json
 ```
 
 ---
