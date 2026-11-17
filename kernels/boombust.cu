@@ -29,7 +29,12 @@ __device__ __forceinline__ unsigned long long mix3(unsigned long long seed,
 
 // 24 random bits mapped into (0, 1). Never exactly zero, so logf() is safe.
 __device__ __forceinline__ float u01(unsigned long long h) {
-    return (float)((h >> 40) + 1ULL) * (1.0f / 16777217.0f);
+    // 0x1p-24f, not 1.0f/16777217.0f: 2^24+1 needs 25 mantissa bits, so it
+    // rounds to 2^24 in float and the scale silently differs by 1 ULP from the
+    // same expression evaluated in double. The NumPy reference uses this exact
+    // constant, so every draw matches bit for bit. Top 24 bits + 1 keeps the
+    // result in (0, 1] -- never 0, so logf() below is always safe.
+    return (float)((h >> 40) + 1ULL) * 0x1p-24f;
 }
 
 // params: {p_active, ln_mu, ln_sigma}. Returns 0 when the player does not post

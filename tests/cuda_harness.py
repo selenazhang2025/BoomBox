@@ -123,7 +123,13 @@ def build() -> ctypes.CDLL:
     if not lib.exists():
         src.write_text(source)
         proc = subprocess.run(
-            [compiler, "-std=c++20", "-O2", "-shared", "-fPIC", str(src), "-o", str(lib)],
+            # -ffp-contract=off: without it the compiler is free to fuse
+            # `ln_mu + ln_sigma * z` into a single FMA, which rounds once where
+            # NumPy rounds twice. GCC defaults to fusing, Apple Clang does not,
+            # which is exactly the kind of difference that makes a test pass on
+            # one machine and fail on another.
+            [compiler, "-std=c++20", "-O2", "-ffp-contract=off",
+             "-shared", "-fPIC", str(src), "-o", str(lib)],
             capture_output=True,
             text=True,
         )

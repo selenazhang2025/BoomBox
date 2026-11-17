@@ -25,7 +25,10 @@ STREAM_SHIFT = np.uint64(0xD1B54A32D192ED03)
 SIDE_STRIDE = np.uint64(1000003)
 
 # 24 random bits mapped into (0, 1); never exactly 0, so log() is safe.
-_U01_SCALE = np.float32(1.0 / 16777217.0)
+# Exactly 2^-24, which is representable in float32; 1/16777217 is not, and
+# evaluating it in double then rounding lands 1 ULP away from what the kernel's
+# float arithmetic produces. See the matching note in kernels/boombust.cu.
+_U01_SCALE = np.float32(2.0) ** np.float32(-24)
 
 
 def splitmix64(x: np.ndarray) -> np.ndarray:
@@ -82,7 +85,10 @@ def draw_scores(
 
     # Box-Muller, using one of the two normals it produces. The kernel does the
     # same thing in the same order so the two agree draw for draw.
-    z = (xp.sqrt(-2.0 * xp.log(u1)) * xp.cos(TWO_PI * u2)).astype(xp.float32)
+    # Every constant is float32: a bare -2.0 is a Python float, which promotes
+    # the whole expression to float64 and rounds once at the end, where the
+    # kernel rounds at every step.
+    z = (xp.sqrt(np.float32(-2.0) * xp.log(u1)) * xp.cos(TWO_PI * u2)).astype(xp.float32)
     values = xp.exp(ln_mu + ln_sigma * z).astype(xp.float32)
     return xp.where(u_active < p_active, values, xp.float32(0.0)).astype(xp.float32)
 

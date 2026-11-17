@@ -167,14 +167,22 @@ Any thread can produce any draw, with no state, no setup and no memory. It also 
 
 `kernels/boombust.cu` is ordinary C++ once the CUDA keywords are defined away. The test suite compiles **the real kernel source, verbatim** with the system C++ compiler, mapping `__global__`, `threadIdx`, `__syncthreads` and `atomicAdd` onto host equivalents — `std::barrier` and `std::atomic_ref`, so a multi-threaded launch really is concurrent — and drives it through `ctypes`.
 
-Because the NumPy reference implements the same counter-based generator, agreement is expected to be **exact**, and it is:
+Because both sides implement the same counter-based generator, the **integer stream is bit-identical by construction** — and so is `u01`, which is an integer-to-float conversion times an exact power of two. Everything after that is not. `logf`, `cosf` and `expf` are different implementations in libm and in NumPy (and different again on a real GPU), and the kernel sums *k* starters sequentially where NumPy sums all *P* through a BLAS matmul. Float addition is not associative.
 
 ```
 kernel total wins 304,691   numpy total wins 304,691
 max |win count difference| : 0
+max |tie count difference| : 1
+max |win prob difference|  : 2.50e-05
 threads 1 vs 64 identical  : True
 tile 16 vs 64 identical    : True
 ```
+
+**The tie is not a bug, and finding out why took the most interesting detour in the project.** An earlier version asserted bit-equality on the counts. It passed here and failed on Linux — the worst kind of test. Chasing it turned up a real defect: the kernel scaled its uniforms by `1.0f / 16777217.0f`, but 2²⁴+1 needs 25 mantissa bits, so in `float` the divisor silently rounds to 2²⁴ and the constant lands **1 ULP** away from the same expression evaluated in double, which is what NumPy was doing. Every draw was slightly wrong. Both sides now use `0x1p-24f`, and bit-agreement on individual draws went from **51.6% to 97.3%**; forbidding FMA contraction in the test build (`-ffp-contract=off`, which GCC does not default to and Apple Clang does) accounts for most of the rest.
+
+The residue is libm, and it is irreducible. It only matters where a comparison sits within a few ULP of the boundary, so the question is how often that happens: in this fixture, **1 comparison in 800,000**. Win counts agree outright. Ties can move by one, because a tie is `total == other` on float32 — the most fragile predicate in the program, and worth one part in 20,000 of win probability. The test asserts that bound rather than bit-equality.
+
+What *is* exact, on any platform, is the decomposition: identical results from 1 thread or 64, and from any tile size. That is the property the kernel's correctness actually rests on, and it holds bit for bit.
 
 This exercises the kernel's indexing, shared-memory layout, RNG, tallying, barrier and atomics. It says nothing about warp behaviour, occupancy or real device memory — those need a GPU.
 
@@ -184,32 +192,45 @@ This exercises the kernel's indexing, shared-memory layout, RNG, tallying, barri
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/img/benchmark-dark.png">
-  <img src="docs/img/benchmark.png" alt="Throughput by backend on a log scale, measured on an NVIDIA T4: pure Python 2 million lineup-simulations per second, NumPy 193 million, CuPy 6.8 billion, the CUDA kernel 22.9 billion" width="760">
+  <img src="docs/img/benchmark.png" alt="Throughput by backend on a log scale, measured on an NVIDIA T4: NumPy 193 million lineup-simulations per second, CuPy 6.8 billion at 35x NumPy, the CUDA kernel 22.9 billion at 119x NumPy" width="760">
 </picture>
 
 One *lineup-simulation* = sum one candidate lineup's starters for one simulated week and compare it to the opponent. A week with 1,700 lineups and a million simulations is 1.7 billion of them.
 
-| backend | lineup-sims/sec | vs pure Python | peak memory | wall clock |
-|---|---|---|---|---|
-| `python` (nested loops) | 2,039,434 | 1× | 136 MB | 13 min 54 s† |
-| `numpy` | 192,835,394 | **95×** | 274 MB | 8.82 s |
-| `cupy` | 6,792,226,813 | **3,330×** | 1,095 MB | 0.25 s |
-| `cuda` | 22,886,369,405 | **11,222×** | **0.089 MB** | 0.074 s |
+| backend | lineup-sims/sec | **vs NumPy** | vs pure Python | peak memory | wall clock |
+|---|---|---|---|---|---|
+| `python` (nested loops) | 2,039,434 | 0.011× | 1× | 136 MB† | 13 min 54 s† |
+| `numpy` | 192,835,394 | **1×** | 95× | 274 MB | 8.82 s |
+| `cupy` | 6,792,226,813 | **35×** | 3,330× | 1,095 MB | 0.25 s |
+| `cuda` | 22,886,369,405 | **119×** | 11,222× | **0.089 MB** | 0.074 s |
 
 Measured on an **NVIDIA Tesla T4** (Turing, 40 SMs, 16 GB GDDR6, 320 GB/s), Linux x86_64, Python 3.13.16.
 
-† The Python baseline is timed on a 4,000-simulation slice and quoted as a rate — the full 1.7 billion would take about fourteen minutes, and the point of the row is the rate, not the wait.
+**The number that matters is 119×, against NumPy.** Nobody would run nested Python loops for this, so measuring against them flatters the GPU: 11,222× is mostly a statement about the interpreter. NumPy is what a competent implementation looks like on a CPU, and beating it by two orders of magnitude is the claim worth defending.
+
+† The Python row is timed on a 4,000-simulation slice and quoted as a rate; its 136 MB is that slice's draw buffer scaled to the full workload, not a measurement. The full 1.7 billion would take about fourteen minutes, and the point of the row is the rate, not the wait.
 
 **Read the memory column, not just the speed one.** Every figure there is quoted at the same 1,000,000-simulation workload, which is the only way the column compares like with like.
 
 CuPy is not short of memory — it chunks to a 1 GB budget, and 1,095 MB is under 7% of a T4's 16 GB. Its problem is *traffic*. Materialising the lineup totals means writing 1,700 × 1,000,000 floats — **6.8 GB** — to device memory and reading them back to compare them, about 54 GB/s sustained against the T4's 320 GB/s. The kernel keeps each lineup's running total in a register and writes only the final counters: **27 kB, once.** That is where the extra 3.4× comes from, and it is the whole argument for writing the kernel — the part a speed chart alone hides.
 
-For scale, on this T4 the kernel runs at roughly **10% of the card's shared-memory load throughput** and 8% of its instruction issue rate, so the 11,222× is a result of not moving data rather than of saturating the hardware. There is headroom left in it.
+For scale — and this is an **estimate from published T4 specifications, not profiler output**; I have not run Nsight on it — the kernel is nowhere near the hardware roof. The arithmetic:
+
+```
+1,700 lineups x 1,000,000 sims x 9 starters = 1.53e10 shared-memory loads
+                              / 0.0743 s    = 2.06e11 loads/s
+T4 roof: 40 SMs x 32 banks x 1.59 GHz       = 2.04e12 loads/s   -> ~10%
+```
+
+So the 119× comes from *not moving data*, not from saturating the card. A profiler would be the way to find out what the remaining 90% is going to; occupancy and the shared-memory access pattern are the first things I would look at.
 
 Reproducing it needs a CUDA machine:
 
 ```bash
-pip install -e ".[gpu]"
+pip install -e .
+# then install the CuPy build matching your CUDA version -- Colab and most
+# GPU images already ship one, and `pip install -e ".[gpu]"` would add a second
+pip install cupy-cuda12x               # only if you do not already have CuPy
 boombust backends                      # confirm they are visible
 boombust benchmark --chart docs/img/benchmark.png --out docs/benchmark.json
 ```
@@ -241,7 +262,7 @@ python scripts/make_charts.py --benchmark-from docs/benchmark.json
 
 **What it does not show.** It does **not** beat the projected-points baseline — skill score **−0.004**, a dead heat. That baseline takes the projected margin and maps it to a probability with a logistic fitted on these very outcomes, and it turns out to carry nearly the same information.
 
-That is the honest result, and it makes sense: a lineup's win probability is mostly a monotone function of its projected margin, so a well-fitted curve over the margin gets most of the way there. Two things the simulator still has:
+That is the honest result, and it makes sense: a lineup's win probability is mostly a monotone function of its projected margin, so a well-fitted curve over the margin gets most of the way there. Three things the simulator still has:
 
 - it is calibrated **with nothing fitted** — the baseline needed 1,120 historical outcomes to learn its slope, while the simulator reads it off the distributions;
 - it is **sharper** at equal calibration (0.139 vs 0.103), meaning it commits further from 50%;
@@ -293,7 +314,6 @@ The full run is in [`docs/decisions.csv.gz`](docs/decisions.csv.gz) (one row per
 - **Validation uses synthetic leagues.** The players, stat lines, schedules and outcomes are real; the rosters are drafted by the tool. Four independently-drafted leagues per season were used to widen the sample, which means the 1,120 matchups are not fully independent — they share underlying player-weeks.
 - **The opponent is assumed to set their projected-best lineup.** `--opponent-lineup actual` uses what they really started, where that is known.
 - **Defensive adjustment is positional and coarse** — points allowed to a position, shrunk and clamped. No scheme, no pace, no weather, no Vegas lines.
-- **GPU backends are unbenchmarked**, for the reason given above.
 - **In-season data depends on nflverse publishing it.** `boombust ingest --list` shows what is actually available.
 
 ---
@@ -354,7 +374,7 @@ No network and no GPU required. The CUDA kernel tests skip automatically if no C
 
 Worth a look:
 
-- `tests/test_cuda_kernel.py` — the real `.cu` source compiled for the CPU and checked against the NumPy reference, exactly.
+- `tests/test_cuda_kernel.py` — the real `.cu` source compiled for the CPU and checked against the NumPy reference: the RNG stream and the thread/tile decomposition bit for bit, the win counts to a measured ULP bound.
 - `tests/test_risk_tilt.py` — the project's central claim, proved by holding projected points fixed and varying only the spread.
 - `tests/test_lineups.py` — the fast enumerator cross-checked against exhaustive subset search.
 - `tests/test_pipeline.py` — stat lines in, ranked lineups out, on a fabricated database.

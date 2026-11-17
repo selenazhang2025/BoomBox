@@ -215,6 +215,11 @@ def reliability_chart(
 
 
 # --- benchmark ------------------------------------------------------------
+def _ratio(x: float) -> str:
+    """A speedup reads as 0.011x below 1 and 119x above it, never 0x."""
+    return f"{x:,.0f}x" if x >= 10 else (f"{x:.1f}x" if x >= 1 else f"{x:.3f}x")
+
+
 def benchmark_chart(
     rows: Sequence[dict],
     path: Path | str,
@@ -247,7 +252,12 @@ def benchmark_chart(
             markeredgecolor=theme.surface, markeredgewidth=2, zorder=4,
         )
 
-        baseline = values[0] if len(values) else 1.0
+        # NumPy, not the nested-loop baseline, when it is present: nobody would
+        # write the slow one for real work, so measuring against it inflates the
+        # GPU rows and says more about the interpreter than about the kernel.
+        ref = next((r for r in usable if r["backend"] == "numpy"), None)
+        baseline = ref["lineup_sims_per_sec"] if ref else (values[0] if len(values) else 1.0)
+        against = "numpy" if ref else "baseline"
         extrapolated = False
         for pos, row, value in zip(positions, usable, values):
             # Peak memory only compares across rows if every row is quoted at the
@@ -260,7 +270,7 @@ def benchmark_chart(
             mark = "*" if row.get("extrapolated") else ""
             extrapolated |= bool(row.get("extrapolated"))
             ax.annotate(
-                f"{value:,.0f}/s{mark}    {value / baseline:,.0f}x    {peak_text} peak",
+                f"{value:,.0f}/s{mark}    {_ratio(value / baseline)}    {peak_text} peak",
                 xy=(value, pos), xytext=(14, 0), textcoords="offset points",
                 va="center", fontsize=9, color=theme.ink_secondary, zorder=5,
             )
@@ -273,7 +283,7 @@ def benchmark_chart(
             # stretching the axis to fit text instead would paint decade ticks
             # across empty space the data never reaches.
             ax.set_xlim(floor, values.max() * 2.2)
-        ax.set_xlabel("lineup-simulations per second (log scale)")
+        ax.set_xlabel(f"lineup-simulations per second (log scale) · speedup shown vs {against}")
         ax.xaxis.grid(True)
         ax.yaxis.grid(False)
         ax.set_axisbelow(True)

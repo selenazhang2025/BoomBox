@@ -2,8 +2,21 @@
 
 ``kernels/boombust.cu`` is compiled verbatim by the system C++ compiler with the
 CUDA keywords shimmed onto host equivalents (see ``cuda_harness``), then checked
-against the NumPy reference backend. Because both sides use the same
-counter-based RNG, agreement is expected to be *exact*, not merely statistical.
+against the NumPy reference backend.
+
+What is exact, and what is not. The RNG is counter-based, so the *integer*
+stream is bit-identical on both sides by construction, and so is ``u01``. What
+follows it is not: ``logf``/``cosf``/``expf`` are different implementations in
+libm and in NumPy (and different again on a real GPU), so individual draws agree
+to a few ULP rather than to the bit. The kernel also sums k starters
+sequentially where NumPy sums all P through a BLAS matmul, and float addition is
+not associative.
+
+That only matters where a comparison sits within a few ULP of the boundary. In
+this fixture exactly 1 of 800,000 comparisons does, so win counts agree outright
+and ties -- which are an *exact float equality* and the most fragile predicate
+here -- may differ by one. Asserting bit-equality on the counts passed on macOS
+and failed on Linux; the tolerances below are set from that measurement.
 
 Caveat worth stating plainly: this exercises the kernel's indexing, shared
 memory layout, RNG and tallying, and -- with the multi-threaded launch -- its
@@ -45,13 +58,50 @@ def case():
     return mine, theirs, lineups, opp_lineup
 
 
-def test_kernel_matches_numpy_reference_exactly(case):
+def test_rng_stream_is_bit_identical(case):
+    """The part that *is* exact, on every platform: the counter-based stream.
+
+    Everything downstream inherits its determinism from here, so this is worth
+    asserting on its own rather than through the win counts.
+    """
+    from boombust.sim.rng import _mix, _u01
+
+    seed, sims = np.uint64(99), np.arange(4096, dtype=np.uint64)
+    # splitmix64 is defined on wrapping uint64 arithmetic; the overflow is the
+    # algorithm, not an accident.
+    with np.errstate(over="ignore"):
+        h = _mix(seed, np.uint64(3), sims)
+        u = _u01(h)
+    assert u.dtype == np.float32
+    # u01 is an integer-to-float conversion times an exact power of two, so it
+    # is reproducible bit for bit -- and never 0, which keeps log() safe.
+    assert (u > 0).all() and (u <= 1).all()
+    with np.errstate(over="ignore"):
+        again = _u01(_mix(seed, np.uint64(3), sims))
+    assert np.array_equal(again.view(np.int32), u.view(np.int32))
+
+
+def test_kernel_matches_numpy_reference(case):
+    """Counts agree; the residue is float rounding, and it is bounded.
+
+    Ties are allowed to move because a tie is ``total == other`` on float32 --
+    one ULP either way erases or invents one. Win probability is what the tool
+    actually reports, so that is held to a tight tolerance.
+    """
     mine, theirs, lineups, opp = case
     n_sims = 20_000
     wins, ties = cuda_harness.run_kernel(mine, theirs, lineups, opp, n_sims, seed=99, tile=16)
     reference = numpy_simulate(mine, theirs, lineups, opp, n_sims, seed=99, rng="counter")
-    np.testing.assert_array_equal(wins, reference.wins)
-    np.testing.assert_array_equal(ties, reference.ties)
+
+    # Measured: 1 comparison in 800,000 lies within 16 ULP of the boundary, so
+    # a handful of flips is the honest ceiling -- not an open-ended tolerance.
+    assert np.abs(wins - reference.wins).max() <= 1
+    assert np.abs(ties - reference.ties).max() <= 1
+    assert int((wins != reference.wins).sum() + (ties != reference.ties).sum()) <= 4
+
+    kernel_p = (wins + 0.5 * ties) / n_sims
+    reference_p = (reference.wins + 0.5 * reference.ties) / n_sims
+    assert np.abs(kernel_p - reference_p).max() < 1e-4
 
 
 def test_results_are_independent_of_thread_count(case):
